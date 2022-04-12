@@ -1,0 +1,80 @@
+---
+title: "Swissroll Generation"
+---
+
+```{r Init, include=TRUE, echo = FALSE}
+library(plot3D)
+library(e1071)
+library(MASS)
+library(xtable)
+library(writexl)
+```
+
+
+```{r Swissroll with KNN, fig.width=12, fig.height=6, include=TRUE, echo=TRUE, fig.align = 'center', tidy = TRUE}
+
+set.seed(1)
+
+# -- CONSTANTS ----------------
+N = 1500                 # Number of points
+Turns = 2                # Number of turns in the spiral
+R_begin = 0.1            # Stating radius of the spiral
+R_step = 3               # delta R in 1 turn
+Z_max = 5                # Z - width of the swissroll
+Z_start  = -Z_max/2      # Z - start of the swissroll
+Xf_max = 10              # Xf - lengh of the swissroll
+Yf_max = Z_max           # Yf - width of the swissroll
+Yf_start  = -Yf_max/2    # Yf  - start of the swissroll
+Xf_bw = 1                # width of the bands
+palette(rainbow(Xf_max))
+# -- SPIRAL FUCNTIONS ---------
+s_preint = function(hoek,a){return(sqrt((R_begin + a*hoek)^2 + a^2))}
+s_spiral = function(hoek,a){return(integrate(s_preint,lower = 0, upper = hoek, a = a)$value)}
+f_hoek = function(hoek, s_hoek, a){return(abs(s_spiral(hoek, a) - s_hoek))}
+f_Aconst = function(a, hoek, s_hoek){return(abs(s_spiral(hoek, a) - s_hoek))}
+# -- FLAT surface -------------
+Xf_unif = floor(runif(N,min = 1,max = Xf_max+0.9999999))-0.5
+Xf_band = runif(n = N, min = -Xf_bw/2, max = Xf_bw/2)
+Xf = Xf_unif + Xf_band
+P1 = which(Xf==min(Xf))
+Yf = runif(N,min = Yf_start,max = Yf_start+Yf_max)
+# -- Archimedean spiral ---------
+# Archimedean spiral
+Aconst = optim(par = c(R_step), fn = f_Aconst, s_hoek=Xf_max, hoek = Turns*2*pi, method = c("L-BFGS-B"))$par
+R_step = Aconst*2*pi
+Aamd = seq(from = 0, to = (Turns*2*pi), length.out = N)
+Ramd = R_begin + Aconst * Aamd
+Xamd = Ramd*cos(Aamd)
+Yamd = Ramd*sin(Aamd)
+Zamd = Yf
+XYZamd = cbind(Xamd,Yamd,Zamd)
+# -- FLAT surface rolled up ------
+Aa = vector(length = N)
+for(sh in c(1:N)){Aa[sh] = optim(par = c(Aamd[sh]), fn = f_hoek, s_hoek=Xf[sh], a = Aconst, method = c("L-BFGS-B"))$par}
+R = R_begin + (Aconst * Aa)
+X = R*cos(Aa)
+Y = R*sin(Aa)
+Z = Yf
+XYZ = cbind(X,Y,Z)
+# -- PLOT ------------------------
+par(mfrow = c(1, 2), mar = c(5, 4, 5, 4))
+# c(bottom, left, top, right)
+plot(Xf,Yf,
+     type = "p",
+     pch = 20-(5*((Xf_unif+0.5)%%2)),
+     cex = 0.4,
+     col = Xf_unif+0.5,
+     xlim = c(-0.2,0.2+Xf_max),
+     ylim = c(Yf_start-0.5,0.5+(Yf_start+Yf_max)),
+     xlab="Lenght of the spiral", ylab="Z-axis",
+     main=paste("Flat surface with bands of normally distributed points","to be rolled into a Swiss roll",sep = '\n'))
+plot(X,Y,
+     type = "p",
+     pch = 20-(5*((Xf_unif+0.5)%%2)),
+     cex = 0.4,
+     col = Xf_unif+0.5,
+     xlab="X-axis", ylab="Y-axis",
+     main=paste("Flat surface rolled into Swiss roll","viewed along Z-axis",sep = '\n'))
+abline(h=0,v=0,col = 'grey')
+# -- END ------------------------
+```

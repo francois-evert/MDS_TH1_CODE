@@ -1,0 +1,366 @@
+---
+title: "Swissroll"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r Functions, fig.width=6, fig.height=6, include=TRUE, echo=TRUE, fig.align = 'center'}
+
+Remediations = function(datapoints, NN = 2, method = 'local_mds', alfa = 1.3){
+  NNN = NN*1
+  dp = datapoints
+  ddp = dim(datapoints)[1]
+  ddpts = dim(datapoints)[1]
+  XYZ_new = dp    #matrix(NA,ddp,3)
+  print(paste0(method," implementing..."))
+# ----------------------------------------
+  if(method == 'KNN_mean'){
+    dpn = KNNF(dp,NN,returnall = FALSE)
+    for(ii in c(1:ddp)){
+      XYZ_new[ii,] = cbind(mean(dp[dpn$neighbours[ii,],1]),mean(dp[dpn$neighbours[ii,],2]),mean(dp[dpn$neighbours[ii,],3]))
+    }
+  }
+# ----------------------------------------
+  else if(method == 'KNN_mean_lim'){
+    dpn = KNNF(dp,NN,returnall = FALSE)
+    ptch = 0
+    for(ii in c(1:N)){
+      mn_edge = mean(as.vector(dpn$edges[ii,]),na.rm = TRUE)
+      sd_edge = sd(as.vector(dpn$edges[ii,]),na.rm = TRUE)
+      for(jj in c(1:NN)){
+        nnch = 0
+          if(dpn$edges[ii,jj] > alfa * mn_edge){
+            dpn$neighbours[ii,jj] = NA
+            nnch = nnch + 1
+          }
+      }
+        XYZ_new[ii,] = cbind(mean(dp[dpn$neighbours[ii,],1],na.rm = TRUE),
+                         mean(dp[dpn$neighbours[ii,],2],na.rm = TRUE),
+                         mean(dp[dpn$neighbours[ii,],3],na.rm = TRUE))
+        if(nnch > 0){
+          ptch = ptch + 1
+        }
+    }
+    print(paste0("nr of points changed = ",ptch))  
+  }
+# ----------------------------------------
+  else if(method == 'KNN_mean_2nd_nhbr'){
+    dpn = KNNF(dp,NN,returnall = FALSE)
+    
+    for(ii in c(1:ddp)){
+      mknnd = matrix(NA,NN+1,NN)
+      mknnd[1,] = dpn$neighbours[ii,]
+      for(jj in c(1:NN)){
+        mknnd[(jj+1),] = dpn$neighbours[dpn$neighbours[ii,jj],]
+      }
+      XYZ_new[ii,] = cbind(mean(dp[as.vector(mknnd),1]),mean(dp[as.vector(mknnd),2]),mean(dp[as.vector(mknnd),3]))
+    }
+  }
+# ----------------------------------------
+  else if(method == 'KNN_mean_2nd_nhbr_lim'){
+    dpn = KNNF(dp,NN,returnall = FALSE)
+     ptch = 0
+    for(ii in c(1:ddpts)){
+      mknnd = matrix(NA,NN+1,NN)
+      mknndd = matrix(NA,NN+1,NN)
+      mknnd[1,] = dpn$neighbours[ii,]
+      mknndd[1,] = dpn$edges[ii,]
+      for(jj in c(1:NN)){
+        nnch = 0
+        mknnd[(jj+1),] = dpn$neighbours[dpn$neighbours[ii,jj],]
+        mknndd[(jj+1),] = dpn$edges[dpn$neighbours[ii,jj],]
+        if(mean(mknndd[(jj+1),]) > alfa * mean(mknndd[1,])){
+          mknnd[(jj+1),] = NA
+          nnch = nnch + 1
+        } else {
+            mknnd[(jj+1),] = dpn$neighbours[dpn$neighbours[ii,jj],]
+        }
+        
+      }
+      XYZ_new[ii,] = cbind(mean(dp[as.vector(mknnd),1],na.rm = TRUE),
+                           mean(dp[as.vector(mknnd),2],na.rm = TRUE),
+                           mean(dp[as.vector(mknnd),3],na.rm = TRUE))
+      if(nnch > 0){
+          ptch = ptch + 1
+        }
+    }
+     print(paste0("nr of points changed = ",ptch)) 
+  }
+# ----------------------------------------
+  else if(method == 'KNN_mean_dot'){
+      dpnn = KNNF(dp,NNN,returnall = FALSE)
+       ptch = 0
+      for(ii in c(1:ddpts)){
+      ndot = matrix(NA,4,length(combn(NNN+1,2,simplify = TRUE)))
+      ndi = 1
+      for(jj in c(2:(NNN-1))){
+        nnch = 0
+        for(kk in c((jj+1):NNN)){
+          ndot[1,ndi] = ii
+          ndot[2,ndi] = jj
+          ndot[3,ndi] = kk
+          ndot[4,ndi] = abs(dot(dp[dpnn$neighbours[ii,jj],]-dp[dpnn$neighbours[ii,1],],
+                                dp[dpnn$neighbours[ii,kk],]-dp[dpnn$neighbours[ii,1],]))
+          ndi = ndi + 1
+         } 
+       }
+      ndot[1,] = ndot[1,order(ndot[4,],decreasing = TRUE)]
+      ndot[2,] = ndot[2,order(ndot[4,],decreasing = TRUE)]
+      ndot[3,] = ndot[3,order(ndot[4,],decreasing = TRUE)]
+      ndot[4,] = ndot[4,order(ndot[4,],decreasing = TRUE)]
+
+      XYZ_new[ii,] = cbind(mean(dp[dpnn$neighbours[ii,c(1,unique(as.vector(ndot[c(2:3),]))[1:min(3,as.integer(NN/2))])],1]),
+                           mean(dp[dpnn$neighbours[ii,c(1,unique(as.vector(ndot[c(2:3),]))[1:min(3,as.integer(NN/2))])],2]),
+                           mean(dp[dpnn$neighbours[ii,c(1,unique(as.vector(ndot[c(2:3),]))[1:min(3,as.integer(NN/2))])],3]))
+    } 
+  }
+# ----------------------------------------
+  else if(method == 'Dist_to_Plane'){
+       dpn = KNNF(dp,NNN,returnall = FALSE)
+       D2P = matrix(NA,ddpts,NNN+1-3)
+       P2U = matrix(NA,ddpts,NNN+1-3)
+       for(ii in c(1:ddpts)){
+         allpts = rbind(dp[ii,],dp[dpn$neighbours[ii,],])               # point plus all neighbours xyz
+         allptsi = c(ii,dpn$neighbours[ii,])                            # point plus all neighbours indices
+         # D3A = KNNF(datapoints = allpts, NNN = 3,returnall = FALSE)      # 3 nearest of all neighbours
+         D3A = allptsi[1:3]
+         pts = NNN+1-3
+         for(jj in c(1:pts)){
+           P2U[ii,jj] = allptsi[jj+3]
+           D2P[ii,jj] = dist2plane(allpts[jj+3,], allpts[c(1:3),])  #[jj,]
+         }
+       }
+       sddist = as.matrix(apply(X = D2P, MARGIN = 1, FUN = sd, na.rm = TRUE))
+       meandist = as.matrix(apply(X = D2P, MARGIN = 1, FUN = mean, na.rm = TRUE))
+       FFP = t(apply(X = cbind(D2P,meandist,sddist), MARGIN = 1, FUN = FarFromPlane, PsdTimes = 1.5, NN = NN-2))
+       fardisti = as.matrix(apply(X = FFP, MARGIN = 1, FUN = match, x = TRUE))
+       FarPts = NA
+       ll = 1
+       for(kk in c(1:ddpts)){
+         if(!is.na(fardisti[kk,1])){
+           FarPts[ll] = P2U[kk,fardisti[kk,1]]
+           ll = ll + 1
+         }
+       }
+       # FarPts = 100
+       if(!is.na(FarPts)){
+         FarPtsU = unique(FarPts)
+         for(ii in c(1:length(FarPtsU))){
+         XYZ_new[FarPtsU[ii],1] = dp[dpn$neighbours[FarPtsU[ii],1],1]*runif(1,0.99,1.01)
+         XYZ_new[FarPtsU[ii],2] = dp[dpn$neighbours[FarPtsU[ii],1],2]*runif(1,0.99,1.01)
+         XYZ_new[FarPtsU[ii],3] = dp[dpn$neighbours[FarPtsU[ii],1],3]*runif(1,0.99,1.01)
+         }
+         print(paste0('Nr of points changed : ',length(FarPtsU)))
+       } else {
+          print('Nr of points changed : 0')  
+       }
+    }
+# ----------------------------------------
+  else if(method == 'local_plane_angle'){
+       dpn = KNNF(dp,NNN,returnall = FALSE)
+       angles_x = matrix(NA,ddpts,NNN+2)
+       angles_x_change = matrix(NA,ddpts,NNN+1)
+       angles_y = matrix(NA,ddpts,NNN+2)
+       angles_y_change = matrix(NA,ddpts,NNN+1)
+       angles_z = matrix(NA,ddpts,NNN+2)
+       angles_z_change = matrix(NA,ddpts,NNN+1)
+       angle_change = matrix(NA,ddpts,NNN+1)
+       allptsi = matrix(NA,ddpts,NNN+1)
+       allptsonp = matrix(NA,ddpts,3)
+       for(ii in c(1:ddpts)){
+         allpts = rbind(dp[ii,],dp[dpn$neighbours[ii,],])         # point plus all neighbours xyz
+         allptsi[ii,] = c(ii,dpn$neighbours[ii,])                 # point plus all neighbours indices
+         pts = NNN+1
+         appca = prcomp(allpts)
+         p1 = apply(allpts,2,mean)
+         p2 = p1 + t(appca$rotation[,1])
+         p3 = p1 + t(appca$rotation[,2])
+         appln = getPlane(rbind(p1,p2,p3))
+         pp2 = c(appln$a,appln$b,appln$c,appln$d)
+         ppx =  c(1,0,0,0)
+         ppy =  c(0,1,0,0)
+         ppz =  c(0,0,1,0)
+         angles_x[ii,NNN+2] = get_planes_angle(ppx,pp2)
+         angles_y[ii,NNN+2] = get_planes_angle(ppy,pp2)
+         angles_z[ii,NNN+2] = get_planes_angle(ppz,pp2)
+         for(jj in c(1:pts)){
+            appca = prcomp(allpts[-jj,])
+            p1 = apply(allpts[-jj,],2,mean)
+            p2 = p1 + t(appca$rotation[,1])
+            p3 = p1 + t(appca$rotation[,2])
+            appln = getPlane(rbind(p1,p2,p3))
+            pp2 = c(appln$a,appln$b,appln$c,appln$d)
+            angles_x[ii,jj] = get_planes_angle(ppx,pp2)
+            angles_y[ii,jj] = get_planes_angle(ppy,pp2)
+            angles_z[ii,jj] = get_planes_angle(ppz,pp2)
+            angles_x_change[ii,jj] = abs(angles_x[ii,jj]-angles_x[ii,NNN+2])*(180/pi)
+            angles_y_change[ii,jj] = abs(angles_y[ii,jj]-angles_y[ii,NNN+2])*(180/pi)
+            angles_z_change[ii,jj] = abs(angles_z[ii,jj]-angles_z[ii,NNN+2])*(180/pi)
+            angle_change[ii,jj] = angles_x_change[ii,jj] + angles_y_change[ii,jj] + angles_z_change[ii,jj]
+          }
+       }
+        pts2rem = min(round(NNN/2,0),NNN-3)
+        movept = matrix(NA,ddpts,pts2rem)
+        for(ii in (1:ddpts)){
+          movept[ii,] = order(angle_change[ii,], decreasing = TRUE)[1:pts2rem]
+        }
+        mpt = 0
+        pp2 = matrix(NA,ddpts,4)
+        minmaxpts = matrix(NA,ddpts,3*3)
+        for(ii in (1:ddpts)){
+          allpts = rbind(dp[ii,],dp[dpn$neighbours[ii,],])         # point plus all neighbours xyz
+          allptsi[ii,] = c(ii,dpn$neighbours[ii,])                 # point plus all neighbours indices          
+          mps = as.vector(movept[ii,!is.na(movept[ii,])])
+            appca = prcomp(allpts[-mps,])
+            p1 = apply(allpts[-mps,],2,mean)
+            p2 = p1 + t(appca$rotation[,1])
+            p3 = p1 + t(appca$rotation[,2])
+            appln = getPlane(rbind(p1,p2,p3))
+            pp2[ii,] = c(appln$a,appln$b,appln$c,appln$d)
+            allptsonp = matrix(NA,3,3)
+            for(jj in c(1:3)){
+              allptsonp[jj,] = point_on_plane(allpts[jj,],pp2[ii,])
+            }
+            minmaxpts[ii,] = c(allptsonp[1,],allptsonp[2,],allptsonp[3,])
+            XYZ_new[ii,] = point_on_plane(allpts[1,],pp2[ii,])
+            mpt = mpt + 1
+          # }
+        }
+print(paste0("Number of points moved = ",mpt)) 
+   }
+# ----------------------------------------
+  else if(method == 'Nbr_of_Nbrs'){
+# 1 = "All points inside manifold"
+# 2 = "Few points outside manifold"
+# 3 = "Main point outside manifold"
+       dpn = KNNF(dp,NNN,returnall = FALSE)
+       val_nbrsi = matrix(NA,ddpts,NNN)
+       scenarios = matrix(NA,ddpts,2)
+       for(ii in c(1:ddpts)){
+         for(jj in c(1:NNN)){ 
+           val_nbrsi[ii,jj] = (ii %in% dpn$neighbours[dpn$neighbours[ii,jj],])
+         }
+           if(sum(val_nbrsi[ii,]) < NNN/2){
+             scenarios[ii,1] = 3
+             scenarios[ii,2] = "Main point outside manifold"
+           } else if (sum(val_nbrsi[ii,]) > (NNN*0.9)) {
+             scenarios[ii,1] = 1
+             scenarios[ii,2] = "All points inside manifold"  
+           } else {
+             scenarios[ii,1] = 2
+             scenarios[ii,2] = "Few points outside manifold"  
+           }
+       }
+       mp = 0
+       s1 = 0
+       s2 = 0
+       s3 = 0
+       for(ii in c(1:ddpts)){
+         if(scenarios[ii,1] == 3){  #"Main point outside manifold"
+           # move main point to nearest common neighbor
+             XYZ_new[ii,] = dp[dpn$neighbours[ii,which(val_nbrsi[ii,])[1]],]*runif(1,0.99,1.01)
+             mp = mp+1
+             s3 = s3+1
+         } else if (scenarios[ii,1] == 1) {
+           # do nothing
+           s1 = s1+1
+         } else {   #"Few points outside manifold"
+           # move main point to plane
+             goodnn = which(val_nbrsi[ii,])
+             allpts = rbind(dp[ii,],dp[dpn$neighbours[ii,],])[c(1,1+goodnn),]         # point plus all neighbours xyz
+             allptsi = c(ii,dpn$neighbours[ii,])[c(1,1+goodnn)]                 # point plus all neighbours indices
+             appca = prcomp(allpts)
+             p1 = apply(allpts,2,mean)
+             p2 = p1 + t(appca$rotation[,1])
+             p3 = p1 + t(appca$rotation[,2])
+             appln = getPlane(rbind(p1,p2,p3))
+             pp2 = c(appln$a,appln$b,appln$c,appln$d)
+             XYZ_new[ii,] = point_on_plane(allpts[1,],pp2)
+             mp = mp+1
+             s2 = s2+1
+         }
+       }
+       print(paste0("nr of points changed = ",mp,"(",s1,",",s2,",",s3,")"))  
+ }
+# ----------------------------------------
+  else if(method == 'cube_density'){
+# 1. find sparce cubes
+# 2. find points in sparce cubes
+# 3. move points in sparce cubes to dense cubes
+dpn = KNNF(dp,NNN,returnall = FALSE)
+range_x = max(dp[,1]) - min(dp[,1])
+range_y = max(dp[,2]) - min(dp[,2])
+range_z = max(dp[,3]) - min(dp[,3])
+range_sum = sum(range_x,range_y,range_z)
+ext_c = seq(from = 0.2, to = 5, length.out = 20)[6]     #1.5
+cubesx = (range_x/(N^(1/3)))*ext_c
+cubesy = (range_y/(N^(1/3)))*ext_c
+cubesz = (range_z/(N^(1/3)))*ext_c
+# -- SET 1 ------
+x_ival_1 = seq(from = (min(dp[,1])-cubesx), by = cubesx, length.out = (range_x/cubesx)+1)
+y_ival_1 = seq(from = (min(dp[,2])-cubesy), by = cubesy, length.out = (range_y/cubesy)+1)
+z_ival_1 = seq(from = (min(dp[,3])-cubesz), by = cubesz, length.out = (range_z/cubesz)+1)
+nr_cubes_1 = length(x_ival_1)*length(y_ival_1)*length(z_ival_1)
+combi_1 = gtools::permutations(length(x_ival_1),3,repeats.allowed=TRUE)
+dim(combi_1)
+cube_lims_1 = cbind(x_ival_1[combi_1[,1]], x_ival_1[combi_1[,1]]+cubesx,
+                    y_ival_1[combi_1[,2]], y_ival_1[combi_1[,2]]+cubesy,
+                    z_ival_1[combi_1[,3]], z_ival_1[combi_1[,3]]+cubesz)
+cube_density_1 = cbind(combi_1,apply(cube_lims_1, 1, find_density, dta = dp))
+cube_points_1 = t(apply(cube_lims_1, 1, find_points, dta = dp))
+cube_points_1i = apply(cube_points_1, 1, which, arr.ind = TRUE)
+point_cube_1 = matrix(NA,ddpts,3)
+point_density_1 = matrix(NA,ddpts,1)
+for(ii in c(1:ddpts)){
+  for(jj in c(1:dim(combi_1)[1])){
+    if(length(cube_points_1i[[jj]]) > 0){
+      if(ii %in% cube_points_1i[[jj]]){
+        point_cube_1[ii,] = combi_1[jj]
+        point_density_1[ii] = cube_density_1[jj,4]
+      }
+    }
+  }
+}
+# -- SET 2 ------
+x_ival_2 = seq(from = (min(dp[,1])-cubesx), by = cubesx, length.out = (range_x/cubesx)+1)
+y_ival_2 = seq(from = (min(dp[,2])-cubesy), by = cubesy, length.out = (range_y/cubesy)+1)
+z_ival_2 = seq(from = (min(dp[,3])-cubesz), by = cubesz, length.out = (range_z/cubesz)+1)
+nr_cubes_2 = length(x_ival_2)*length(y_ival_2)*length(z_ival_2)
+combi_2 = gtools::permutations(length(x_ival_2),3,repeats.allowed=TRUE)
+cube_lims_2 = cbind(x_ival_2[combi_2[,1]], x_ival_2[combi_2[,1]]+(0.999999*cubesx),
+                    y_ival_2[combi_2[,2]], y_ival_2[combi_2[,2]]+(0.999999*cubesy),
+                    z_ival_2[combi_2[,3]], z_ival_2[combi_2[,3]]+(0.999999*cubesz))
+cube_density_2 = cbind(combi_2,apply(cube_lims_2, 1, find_density, dta = dp))
+cube_points_2 = t(apply(cube_lims_2, 1, find_points, dta = dp))
+cube_points_2i = apply(cube_points_2, 1, which, arr.ind = TRUE)
+point_cube_2 = matrix(NA,ddpts,3)
+point_density_2 = matrix(NA,ddpts,1)
+for(ii in c(1:ddpts)){
+  for(jj in c(1:dim(combi_2)[1])){
+    if(length(cube_points_2i[[jj]]) > 0){
+      if(ii %in% cube_points_2i[[jj]]){
+        point_cube_2[ii,] = combi_2[jj]
+        point_density_2[ii] = cube_density_2[jj,4]
+      }
+    }
+  }
+}
+sparse_dim = c(1,3)
+sparse_points_1 = which(between(point_density_1,sparse_dim[1],sparse_dim[2]))
+sparse_points_2 = which(between(point_density_2,sparse_dim[1],sparse_dim[2]))
+sparse_point_out_1 = intersect(sparse_points_1,col_bands_out)
+sparse_point_out_2 = intersect(sparse_points_2,col_bands_out)
+sparse_points = intersect(sparse_points_2,sparse_points_1)
+sparse_points_out = intersect(sparse_points,col_bands_out)
+print(paste0("nr of points changed = ",length(sparse_points))) 
+sparse_points_missing = setdiff(col_bands_out,sparse_points)
+dp[sparse_points,] = dp[dpn$neighbours[sparse_points,1],]*runif(1,0.99,1.01)
+XYZ_new = dp
+}
+# ----------------------------------------
+  return(XYZ_new)
+}
+
+```

@@ -1,0 +1,181 @@
+---
+title: "Swissroll"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r Functions, fig.width=6, fig.height=6, include=TRUE, echo=TRUE, fig.align = 'center'}
+
+KNNF = function(datapoints, NN, returnall = FALSE){
+p = datapoints
+DP = dim(p)[1]
+D = matrix(NA,DP,DP)
+edges = D
+for(ii in c(1:DP)){
+  for(jj in c(1:DP)){
+    D[ii,jj] = sqrt((p[jj,1]-p[ii,1])^2 + (p[jj,2]-p[ii,2])^2 + (p[jj,3]-p[ii,3])^2)
+  }
+}
+DO = matrix(NA,DP,DP)
+for(ii in c(1:DP)){
+  DO[ii,] = order(D[ii,])
+  edges[ii,] = D[ii,order(D[ii,])]
+}
+  if (returnall == TRUE){
+    return(list(edges = edges[,1:DP], neighbours = DO[,1:DP], k = NN))
+    } else {
+    return(list(edges = edges[,1:NN+1], neighbours = DO[,1:NN+1], k = NN))   
+    }
+}
+
+# ------------------------------------------------------------------
+
+MakeDistNextMatrix = function(datapoints, K, InfAfterK = TRUE){
+testpknn = KNNF(datapoints,K,!InfAfterK)  
+pts = length(testpknn$edges[1,])
+apts = length(testpknn$edges[,1])
+dist = matrix(Inf,apts,apts)
+nexts = matrix(NA,apts,apts)
+for(aa in c(1:apts)){
+  for(bb in c(1:pts)){
+      dist[aa,testpknn$neighbours[aa,bb]] = testpknn$edges[aa,bb]
+      nexts[aa,testpknn$neighbours[aa,bb]] = testpknn$neighbours[aa,bb]
+    }
+  }
+for(aa in c(1:apts)){
+      dist[aa,aa] = 0
+      nexts[aa,aa] = aa
+      }
+return(list(dist = dist, nexts = nexts, apts = apts, pts = pts))
+}
+
+# ------------------------------------------------------------------
+
+Floyd_Orig = function(datapoints, K){
+MM = MakeDistNextMatrix(datapoints, K)
+nexts_init = MM$nexts
+adj = 0
+for(kk in c(1:MM$apts)){
+  for(ii in c(1:MM$apts)){
+    for(jj in c(1:MM$apts)){
+        if(MM$dist[ii,jj] > MM$dist[ii,kk] + MM$dist[kk,jj]){
+          adj = adj + 1
+          MM$dist[ii,jj] = MM$dist[ii,kk] + MM$dist[kk,jj]
+          MM$nexts[ii,jj] = MM$nexts[ii,kk]
+        }
+      }
+    }
+  }
+paths = matrix(NA,MM$apts,MM$apts)
+for(xx in c(1:MM$apts)){
+  for(yy in c(1:MM$apts)){
+    if(is.na(MM$nexts[xx,yy])){
+      paths[xx,yy] = xx
+      paths[xx,yy] = paste(paths[xx,yy],yy)
+    }
+    else{
+      paths[xx,yy] = xx
+      xn = xx
+        while (xn != yy){
+         xn = MM$nexts[xn,yy]
+         paths[xx,yy] = paste(paths[xx,yy],xn)
+        }
+    }
+  }
+}
+return(list(paths = paths,dist = MM$dist))
+}
+
+# ------------------------------------------------------------------
+
+getPlane = function(three_points){
+  tp = three_points
+  x1 = tp[1,1]
+  y1 = tp[1,2]
+  z1 = tp[1,3]
+  x2 = tp[2,1]
+  y2 = tp[2,2]
+  z2 = tp[2,3]
+  x3 = tp[3,1]
+  y3 = tp[3,2]
+  z3 = tp[3,3]
+  a1 = x2 - x1 
+  b1 = y2 - y1 
+  c1 = z2 - z1 
+  a2 = x3 - x1 
+  b2 = y3 - y1 
+  c2 = z3 - z1 
+  a = b1 * c2 - b2 * c1 
+  b = a2 * c1 - a1 * c2 
+  c = a1 * b2 - b1 * a2 
+  d = (- a * x1 - b * y1 - c * z1) 
+  return(list(a=a, b=b, c=c, d=d))
+}
+
+# ------------------------------------------------------------------
+
+dist2plane = function(datapoint,three_points){
+  dp = datapoint
+  tp = three_points
+  pn = getPlane(tp)
+  return((abs(pn$a*dp[1]+pn$b*dp[2]+pn$c*dp[3]+pn$d))/(sqrt(((pn$a)^2)+((pn$b)^2)+((pn$c)^2))))
+}
+
+# ------------------------------------------------------------------
+
+FarFromPlane = function(PdPmPsd,PsdTimes,NN){
+         return(PdPmPsd[1:NN] > PdPmPsd[NN+1]+(PdPmPsd[NN+2]*PsdTimes))
+}
+
+# ------------------------------------------------------------------
+
+find_points = function(dta, cube_lims){
+  in_pts = FALSE  #vector(FALSE,dim(dta)[1])
+  for(ii in c(1:dim(dta)[1])){
+    if((dta[ii,1] >= cube_lims[1]) & (dta[ii,1] < cube_lims[2]) &
+       (dta[ii,2] >= cube_lims[3]) & (dta[ii,2] < cube_lims[4]) &
+       (dta[ii,3] >= cube_lims[5]) & (dta[ii,3] < cube_lims[6])){
+      in_pts[ii] = TRUE
+    } else {
+      in_pts[ii] = FALSE
+    }
+  }
+  return(in_pts)
+}
+
+# ------------------------------------------------------------------
+
+find_density = function(dta, cube_lims){
+  # print(dim(dta))
+  # print(dta)
+  cnt_pts = 0
+  for(ii in c(1:dim(dta)[1])){
+    if((dta[ii,1] >= cube_lims[1]) & (dta[ii,1] < cube_lims[2]) &
+       (dta[ii,2] >= cube_lims[3]) & (dta[ii,2] < cube_lims[4]) &
+       (dta[ii,3] >= cube_lims[5]) & (dta[ii,3] < cube_lims[6])){
+      cnt_pts = cnt_pts +1
+    }
+  }
+  return(cnt_pts)
+}
+
+# ------------------------------------------------------------------
+
+range_val = function(vect){return(max(vect) - min(vect))}
+range_out = function(vect){
+  return(max(abs(vect[1] - max(vect[-1])),abs(vect[1] - min(vect[-1]))))
+}
+
+# ------------------------------------------------------------------
+
+IQR_vals = function(vect, out_factor){
+  IntQrtlRange = quantile(vect, c(.75)) - quantile(vect, c(.25))
+  top_val = quantile(vect, c(.75)) + out_factor*IntQrtlRange
+  bot_val = quantile(vect, c(.25)) - out_factor*IntQrtlRange
+  return(list(vect = vect, out_factor = out_factor, IntQrtlRange = IntQrtlRange, top_val = top_val, bot_val = bot_val))
+}
+
+```
+

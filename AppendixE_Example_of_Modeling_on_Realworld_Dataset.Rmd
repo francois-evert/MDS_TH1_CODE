@@ -1,0 +1,333 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+# Data ------
+set.seed(444)
+rm(list = setdiff(ls(envir = .GlobalEnv), lsf.str(envir = .GlobalEnv)), envir = .GlobalEnv)
+churn_data_raw = read.csv("telecom_churn_data.csv")
+dim(churn_data_raw)  #[1] 99999   226
+churn_data_raw[is.na(churn_data_raw)] = 0
+Not_used = c('mobile_number','last_date_of_month_6','last_date_of_month_7','last_date_of_month_8','last_date_of_month_9',
+          'date_of_last_rech_6','date_of_last_rech_7','date_of_last_rech_8','date_of_last_rech_9',
+          'date_of_last_rech_data_6','date_of_last_rech_data_7','date_of_last_rech_data_8','date_of_last_rech_data_9')
+churn_data_used = churn_data_raw[,!(names(churn_data_raw) %in% Not_used)]
+cvar = apply(X = churn_data_used, MARGIN = 2, FUN = var, na.rm = TRUE)
+no_var = which(cvar==0)
+churn_data_var = churn_data_used[,-no_var]
+dim(churn_data_var)  #[1] 99999   209
+churn = c('total_ic_mou_9','total_og_mou_9','vol_2g_mb_9','vol_3g_mb_9')
+churn_data_Y = matrix(ifelse(apply(churn_data_var[,churn],1,sum)==0,"YES","NO"),ncol = 1)       #churn = 1
+colnames(churn_data_Y) = 'churn_flag'
+churn_data_X = churn_data_var[,!(names(churn_data_var) %in% churn)]
+dim(churn_data_X)  #[1] 99999   197
+churn_sdata_X = churn_data_X/apply(churn_data_X, 2, max)
+datai = seq.int(from = 1, to = dim(churn_data_X)[1])
+train_size = 1000
+test_size  = 1000
+traini = sample.int(dim(churn_data_X)[1],size = train_size)
+testi = sample(datai[-traini],size = test_size)
+# ---split  -----------------------------
+tnt = cbind(churn_data_Y,churn_sdata_X)
+tntx = tnt[,-1]
+tnty = matrix(tnt[,1],ncol = 1)
+train = tnt[traini,]
+trainx = train[,-1]
+trainy = matrix(train[,1],ncol = 1)
+test = tnt[testi,]
+testx = test[,-1]
+testy = matrix(test[,1],ncol = 1)
+# ----------------------------------------------------------------------
+
+# Models ------
+# ----------------------------------------------------------------------
+# ----- dataset as is ---------
+f_train <- data.frame(churn_flag = factor(trainy), trainx)
+f_test <- data.frame(churn_flag = factor(testy), testx)
+grid_rbf = expand.grid(weight = c(0.0001, 0.001, 0.01),
+                       cost     = c(0.0001, 0.001, 0.01))
+fitControl <- trainControl(method = "cv", number = 5)
+fit.rbf2 <- caret::train(churn_flag ~ ., data = f_train,  metric = "Accuracy", method = "svmLinearWeights",
+                         trControl = fitControl, tuneGrid = grid_rbf, verbose = FALSE, preProcess = c("center", "scale") )
+fit.rbf2$bestTune$weight
+fit.rbf2$bestTune$cost
+tr_cv_rbf = predict(fit.rbf2, type = 'raw')
+AccChrnLn1_train_AsIs = sum(tr_cv_rbf == f_train$churn_flag) / nrow(f_train)
+eval_cv_rbf <- predict(fit.rbf2, newdata = f_test, type = 'raw')
+AccChrnLn1_test_AsIs = sum(eval_cv_rbf == f_test$churn_flag) / nrow(f_test)
+AccChrnLn1_train_AsIs
+AccChrnLn1_test_AsIs
+
+# ============================================================
+# ---- using PCA on original data ----------------------------
+# dddd = prcomp(trainx)
+# plot(cumsum(dddd$sdev^2)/sum(dddd$sdev^2), type = "b")
+# aaaa = cumsum(dddd$sdev^2)/sum(dddd$sdev^2)
+# aaaa[50]
+PCs = 50
+pcatrainx = prcomp(trainx)$x[,c(1:PCs)]
+pcatrain = data.frame(churn_flag = factor(trainy),pcatrainx)
+pcatestx = scale(testx, prcomp(trainx)$center, prcomp(trainx)$scale) %*% prcomp(trainx)$rotation
+pcatestx = pcatestx[,c(1:PCs)]
+pcatest = data.frame(churn_flag = factor(testy),pcatestx)
+grid_rbf = expand.grid(weight = c(0.0001, 0.001, 0.01),
+                       cost     = c(0.0001, 0.001, 0.01))
+fitControl <- trainControl(method = "cv", number = 5)
+fit.rbf2 <- caret::train(churn_flag ~ ., data = pcatrain,  metric = "Accuracy", method = "svmLinearWeights",
+                         trControl = fitControl, tuneGrid = grid_rbf, verbose = FALSE, preProcess = c("center", "scale") )
+fit.rbf2$bestTune$weight
+fit.rbf2$bestTune$cost
+tr_cv_rbf = predict(fit.rbf2, type = 'raw')
+AccChrnLn2_train_PCA = sum(tr_cv_rbf == pcatrain$churn_flag) / nrow(pcatrain)
+eval_cv_rbf <- predict(fit.rbf2, newdata = pcatest, type = 'raw')
+AccChrnLn2_test_PCA = sum(eval_cv_rbf == pcatest$churn_flag) / nrow(pcatest)
+AccChrnLn2_train_PCA
+AccChrnLn2_test_PCA
+
+# =============================================================
+# ---- using PCA on SP ----------------------------
+K = 50
+excl=c(8,20,32,35,45,104,123,133,193,197,202,215,264,300,349,381,386,
+  391,409,424,428,452,480,481,491,496,511,529,530,543,544,561,563,571,
+  632,635,647,704,717,753,778,813,833,879,885,886,940,951,994)
+mtrainx = as.matrix(trainx)[-excl,]
+res = k_nn(mtrainx,mtrainx,K)
+asps = paths_sp(res)
+trainxasp = asps$Dg
+print(paste0("Nr unreachable pts : ",
+             length(unique(c(which(apply(X = trainxasp, MARGIN = 1, FUN = function(x) sum(is.na(x)))>100),
+                             which(apply(X = trainxasp, MARGIN = 1, FUN = function(x) sum(is.infinite(x)))>100),
+                             which(apply(X = trainxasp, MARGIN = 2, FUN = function(x) sum(is.na(x)))>100),
+                             which(apply(X = trainxasp, MARGIN = 2, FUN = function(x) sum(is.infinite(x)))>100))))))
+which(apply(X = trainxasp, MARGIN = 1, FUN = function(x) sum(is.na(x)))>0)
+which(apply(X = trainxasp, MARGIN = 1, FUN = function(x) sum(is.infinite(x)))>0)
+which(apply(X = trainxasp, MARGIN = 2, FUN = function(x) sum(is.na(x)))>0)
+which(apply(X = trainxasp, MARGIN = 2, FUN = function(x) sum(is.infinite(x)))>0)
+length(which(apply(X = trainxasp, MARGIN = 2, FUN = function(x) sum(is.na(x)))>0))
+pctx = prcomp(trainxasp, center = TRUE, scale. = TRUE)
+pcatrainx = pctx$x[,c(1:PCs)]
+pcatrain = data.frame(churn_flag = factor(trainy[-excl,]),pcatrainx)
+# -----------------
+K = 25
+excl=c(39,55,94,200,203,226,232,237,243,249,320,325,331,382,391,405,
+  443,467,489,497,508,523,529,531,582,591,603,645,646,654,677,678,702,
+  708,744,756,763,772,786,790,793,829,853,854,864,886,912,928,929,942)
+mtestx = as.matrix(testx)[-excl,]
+res = k_nn(mtestx,mtestx,K)
+asps = paths_sp(res)
+testxasp = asps$Dg
+which(apply(X = testxasp, MARGIN = 1, FUN = function(x) sum(is.na(x)))>0)
+which(apply(X = testxasp, MARGIN = 1, FUN = function(x) sum(is.infinite(x)))>0)
+which(apply(X = testxasp, MARGIN = 2, FUN = function(x) sum(is.na(x)))>0)
+which(apply(X = testxasp, MARGIN = 2, FUN = function(x) sum(is.infinite(x)))>1)
+length(which(apply(X = testxasp, MARGIN = 2, FUN = function(x) sum(is.na(x)))>0))
+pcatestx = scale(testxasp, pctx$center[1:dim(testxasp)[2]], pctx$scale[1:dim(testxasp)[2]]) %*% pctx$rotation[1:dim(testxasp)[2],]
+pcatestx = pcatestx[,c(1:PCs)]
+pcatest = data.frame(churn_flag = factor(testy[-excl,]),pcatestx)
+grid_rbf = expand.grid(weight = c(0.0001, 0.001, 0.01),
+                       cost     = c(0.0001, 0.001, 0.01))
+fitControl <- trainControl(method = "cv", number = 5)
+fit.rbf2 <- caret::train(churn_flag ~ ., data = pcatrain,  metric = "Accuracy", method = "svmLinearWeights",
+                         trControl = fitControl, tuneGrid = grid_rbf, verbose = FALSE, preProcess = c("center", "scale") )
+fit.rbf2$bestTune$weight
+fit.rbf2$bestTune$cost
+tr_cv_rbf = predict(fit.rbf2, type = 'raw')
+AccChrnLn3_train_SP = sum(tr_cv_rbf == pcatrain$churn_flag) / nrow(pcatrain)
+eval_cv_rbf <- predict(fit.rbf2, newdata = pcatest, type = 'raw')
+AccChrnLn3_test_SP = sum(eval_cv_rbf == pcatest$churn_flag) / nrow(pcatest)
+AccChrnLn3_train_SP
+AccChrnLn3_test_SP
+
+# ====================================================================
+# ---- using PCA on SP with "knn lim"  ----------------------------
+K = 50
+dp = as.matrix(trainx)
+ddpts = dim(trainx)[1]
+NNN = K
+XYZ_new = dp
+alfa = 1.3
+    dpn = k_nn(dp,dp,NNN)
+    ptch = 0
+    for(ii in c(1:ddpts)){
+      mn_edge = mean(as.vector(dpn$edges[ii,]),na.rm = TRUE)
+      sd_edge = sd(as.vector(dpn$edges[ii,]),na.rm = TRUE)
+      for(jj in c(1:NNN)){
+        nnch = 0
+          if(dpn$edges[ii,jj] > alfa * mn_edge){
+            dpn$neighbours[ii,jj] = NA
+            nnch = nnch + 1
+          }
+      }
+        XYZ_new[ii,] = apply(dp[dpn$neighbours[ii,],],2,mean,na.rm = TRUE)
+        if(nnch > 0){
+          ptch = ptch + 1
+        }
+    }
+    print(paste0("nr of points changed = ",ptch))
+Kp = 40
+res = k_nn(XYZ_new,XYZ_new,Kp)
+asps = paths_sp(res)
+trainxasp = asps$Dg
+which(apply(X = trainxasp, MARGIN = 1, FUN = function(x) sum(is.na(x)))>0)
+which(apply(X = trainxasp, MARGIN = 1, FUN = function(x) sum(is.infinite(x)))>0)
+which(apply(X = trainxasp, MARGIN = 2, FUN = function(x) sum(is.na(x)))>0)
+which(apply(X = trainxasp, MARGIN = 2, FUN = function(x) sum(is.infinite(x)))>0)
+length(which(apply(X = trainxasp, MARGIN = 2, FUN = function(x) sum(is.na(x)))>0))
+pctx = prcomp(trainxasp, center = TRUE, scale. = TRUE)
+pcatrainx = pctx$x[,c(1:PCs)]
+pcatrain = data.frame(churn_flag = factor(trainy),pcatrainx)  #[-excl,]
+# --------------------------
+K = 50
+dp = as.matrix(testx)
+ddpts = dim(testx)[1]
+NNN = K
+XYZ_new = dp
+alfa = 1.3
+    dpn = k_nn(dp,dp,NNN)
+    ptch = 0
+    for(ii in c(1:ddpts)){
+      mn_edge = mean(as.vector(dpn$edges[ii,]),na.rm = TRUE)
+      sd_edge = sd(as.vector(dpn$edges[ii,]),na.rm = TRUE)
+      for(jj in c(1:NNN)){
+        nnch = 0
+          if(dpn$edges[ii,jj] > alfa * mn_edge){
+            dpn$neighbours[ii,jj] = NA
+            nnch = nnch + 1
+          }
+      }
+        XYZ_new[ii,] = apply(dp[dpn$neighbours[ii,],],2,mean,na.rm = TRUE)
+        if(nnch > 0){
+          ptch = ptch + 1
+        }
+    }
+    print(paste0("nr of points changed = ",ptch))
+Kp = 40
+res = k_nn(XYZ_new,XYZ_new,Kp)
+asps = paths_sp(res)
+testxasp = asps$Dg
+which(apply(X = testxasp, MARGIN = 1, FUN = function(x) sum(is.na(x)))>0)
+which(apply(X = testxasp, MARGIN = 1, FUN = function(x) sum(is.infinite(x)))>0)
+which(apply(X = testxasp, MARGIN = 2, FUN = function(x) sum(is.na(x)))>0)
+which(apply(X = testxasp, MARGIN = 2, FUN = function(x) sum(is.infinite(x)))>0)
+length(which(apply(X = testxasp, MARGIN = 2, FUN = function(x) sum(is.na(x)))>0))
+pcatestx = scale(testxasp, pctx$center, pctx$scale) %*% pctx$rotation
+pcatestx = pcatestx[,c(1:PCs)]
+pcatest = data.frame(churn_flag = factor(testy),pcatestx)  #[-excl,]
+grid_rbf = expand.grid(weight = c(0.0001, 0.001, 0.01),
+                       cost     = c(0.0001, 0.001, 0.01))
+fitControl <- trainControl(method = "cv", number = 5)
+fit.rbf2 <- caret::train(churn_flag ~ ., data = pcatrain,  metric = "Accuracy", method = "svmLinearWeights",
+                         trControl = fitControl, tuneGrid = grid_rbf, verbose = FALSE, preProcess = c("center", "scale") )
+fit.rbf2$bestTune$weight
+fit.rbf2$bestTune$cost
+tr_cv_rbf = predict(fit.rbf2, type = 'raw')
+AccChrnLn4_train_SPNN = sum(tr_cv_rbf == pcatrain$churn_flag) / nrow(pcatrain)
+eval_cv_rbf <- predict(fit.rbf2, newdata = pcatest, type = 'raw')
+AccChrnLn4_test_SPNN = sum(eval_cv_rbf == pcatest$churn_flag) / nrow(pcatest)
+AccChrnLn4_test_SPNN
+AccChrnLn4_test_SPNN
+
+# ==================================================================
+# ---- using PCA on AP with "knn lim"  --------------------------
+K = 50
+dp = as.matrix(trainx)
+ddpts = dim(trainx)[1]
+NNN = K
+XYZ_new = dp
+alfa = 1.3
+    dpn = k_nn(dp,dp,NNN)
+    ptch = 0
+    for(ii in c(1:ddpts)){
+      mn_edge = mean(as.vector(dpn$edges[ii,]),na.rm = TRUE)
+      sd_edge = sd(as.vector(dpn$edges[ii,]),na.rm = TRUE)
+      for(jj in c(1:NNN)){
+        nnch = 0
+          if(dpn$edges[ii,jj] > alfa * mn_edge){
+            dpn$neighbours[ii,jj] = NA
+            nnch = nnch + 1
+          }
+      }
+        XYZ_new[ii,] = apply(dp[dpn$neighbours[ii,],],2,mean,na.rm = TRUE)
+        if(nnch > 0){
+          ptch = ptch + 1
+        }
+    }
+    print(paste0("nr of points changed = ",ptch))
+Kp = 40
+res = k_nn(XYZ_new,XYZ_new,Kp)
+asps = paths_ap(res)
+trainxasp = asps$Dg
+which(apply(X = trainxasp, MARGIN = 1, FUN = function(x) sum(is.na(x)))>0)
+which(apply(X = trainxasp, MARGIN = 1, FUN = function(x) sum(is.infinite(x)))>0)
+which(apply(X = trainxasp, MARGIN = 2, FUN = function(x) sum(is.na(x)))>0)
+which(apply(X = trainxasp, MARGIN = 2, FUN = function(x) sum(is.infinite(x)))>0)
+length(which(apply(X = trainxasp, MARGIN = 2, FUN = function(x) sum(is.na(x)))>0))
+pctx = prcomp(trainxasp, center = TRUE, scale. = TRUE)
+pcatrainx = pctx$x[,c(1:PCs)]
+pcatrain = data.frame(churn_flag = factor(trainy),pcatrainx)  #[-excl,]
+# --------------------------
+K = 50
+dp = as.matrix(testx)
+ddpts = dim(testx)[1]
+NNN = K
+XYZ_new = dp
+alfa = 1.3
+    dpn = k_nn(dp,dp,NNN)
+    ptch = 0
+    for(ii in c(1:ddpts)){
+      mn_edge = mean(as.vector(dpn$edges[ii,]),na.rm = TRUE)
+      sd_edge = sd(as.vector(dpn$edges[ii,]),na.rm = TRUE)
+      for(jj in c(1:NNN)){
+        nnch = 0
+          if(dpn$edges[ii,jj] > alfa * mn_edge){
+            dpn$neighbours[ii,jj] = NA
+            nnch = nnch + 1
+          }
+      }
+        XYZ_new[ii,] = apply(dp[dpn$neighbours[ii,],],2,mean,na.rm = TRUE)
+        if(nnch > 0){
+          ptch = ptch + 1
+        }
+    }
+    print(paste0("nr of points changed = ",ptch))
+Kp = 40
+res = k_nn(XYZ_new,XYZ_new,Kp)
+asps = paths_ap(res)
+testxasp = asps$Dg
+which(apply(X = testxasp, MARGIN = 1, FUN = function(x) sum(is.na(x)))>0)
+which(apply(X = testxasp, MARGIN = 1, FUN = function(x) sum(is.infinite(x)))>0)
+which(apply(X = testxasp, MARGIN = 2, FUN = function(x) sum(is.na(x)))>0)
+which(apply(X = testxasp, MARGIN = 2, FUN = function(x) sum(is.infinite(x)))>0)
+length(which(apply(X = testxasp, MARGIN = 2, FUN = function(x) sum(is.na(x)))>0))
+pcatestx = scale(testxasp, pctx$center, pctx$scale) %*% pctx$rotation
+pcatestx = pcatestx[,c(1:PCs)]
+pcatest = data.frame(churn_flag = factor(testy),pcatestx)  #[-excl,]
+grid_rbf = expand.grid(weight = c(0.0001, 0.001, 0.01),
+                       cost     = c(0.0001, 0.001, 0.01))
+fitControl <- trainControl(method = "cv", number = 5)
+fit.rbf2 <- caret::train(churn_flag ~ ., data = pcatrain,  metric = "Accuracy", method = "svmLinearWeights",
+                         trControl = fitControl, tuneGrid = grid_rbf, verbose = FALSE, preProcess = c("center", "scale") )
+fit.rbf2$bestTune$weight
+fit.rbf2$bestTune$cost
+tr_cv_rbf = predict(fit.rbf2, type = 'raw')
+AccChrnLn5_train_APNN = sum(tr_cv_rbf == pcatrain$churn_flag) / nrow(pcatrain)
+eval_cv_rbf <- predict(fit.rbf2, newdata = pcatest, type = 'raw')
+AccChrnLn5_test_APNN = sum(eval_cv_rbf == pcatest$churn_flag) / nrow(pcatest)
+AccChrnLn5_train_APNN
+AccChrnLn5_test_APNN
+# ---------------------------------
+ChurnLin_tab = rbind(c('AsIs',round(AccChrnLn1_train_AsIs*100,0),round(AccChrnLn1_test_AsIs*100,0),0,0),
+             c('PCA',round(AccChrnLn2_train_PCA*100,0),round(AccChrnLn2_test_PCA*100,0),0,0),
+             c('SP',round(AccChrnLn3_train_SP*100,0),round(AccChrnLn3_test_SP*100,0),
+                     round(100*(AccChrnLn3_train_SP-AccChrnLn2_train_PCA)/AccChrnLn2_train_PCA,1),
+                     round(100*(AccChrnLn3_test_SP-AccChrnLn2_test_PCA)/AccChrnLn2_test_PCA,1)),
+             c('SPNN',round(AccChrnLn4_train_SPNN*100,0),round(AccChrnLn4_test_SPNN*100,0),
+                     round(100*(AccChrnLn4_train_SPNN-AccChrnLn3_train_SP)/AccChrnLn3_train_SP,1),
+                     round(100*(AccChrnLn4_test_SPNN-AccChrnLn3_test_SP)/AccChrnLn3_test_SP,1)),
+             c('APNN',round(AccChrnLn5_train_APNN*100,0),round(AccChrnLn5_test_APNN*100,0),
+                     round(100*(AccChrnLn5_train_APNN-AccChrnLn3_train_SP)/AccChrnLn3_train_SP,1),
+                     round(100*(AccChrnLn5_test_APNN-AccChrnLn3_test_SP)/AccChrnLn3_test_SP,1)))
+
+```
